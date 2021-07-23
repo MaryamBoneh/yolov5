@@ -20,63 +20,74 @@ def detect(opt):
     save_dir = 'output'
     file_name = Path(source).name
 
-    # Load model
-    device = select_device(opt.device)
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    stride = int(model.stride.max())  # model stride
-    imgsz = check_img_size(imgsz, s=stride)  # check img_size
-    names = model.module.names if hasattr(model, 'module') else model.names  # get class names
-  
-    if device.type != 'cpu':
-        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+    source = cv2.VideoCapture(source)
+    width = int(source.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(source.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    video_writer = cv2.VideoWriter('video_detection.avi', cv2.VideoWriter_fourcc(*'MJPG'), 20, (width, height))
+    while True:
 
-    img = cv2.imread(source)
-    original_image = img.copy()
+        validation, frame = source.read()
+        if validation is not True:
+            break
+        # Load model
+        print(validation)
 
-    t0 = time.time()
-    
-    # img = cv2.resize(img, (416, 416))
-    img = letterbox(img)[0]
-    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-    img = np.ascontiguousarray(img)
-    img = torch.from_numpy(img).to(device)
-    img = img.float()  # uint8 to fp16/32
-    img /= 255.0  # 0 - 255 to 0.0 - 1.0
-    img = img.unsqueeze(0)
+        device = select_device(opt.device)
+        model = attempt_load(weights, map_location=device)  # load FP32 model
+        stride = int(model.stride.max())  # model stride
+        imgsz = check_img_size(imgsz, s=stride)  # check img_size
+        names = model.module.names if hasattr(model, 'module') else model.names  # get class names
 
-    # Inference
-    pred = model(img, augment=False)[0]
+        if device.type != 'cpu':
+            model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
 
-    # Apply NMS
-    pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        img = frame
+        original_image = img.copy()
+        t0 = time.time()
 
-    save_path = os.path.join(save_dir, file_name)   
-    # Process detections
-    for det in pred:  # detections per image
-        if len(det):
-            # Rescale boxes from img size to original_image size
-            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], original_image.shape).round()
+        # img = cv2.resize(img, (416, 416))
+        img = letterbox(img)[0]
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img = np.ascontiguousarray(img)
+        img = torch.from_numpy(img).to(device)
+        img = img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        img = img.unsqueeze(0)
 
-            # Write results
-            for *xyxy, conf, cls in reversed(det):
-                c = int(cls)  # integer class
-                label = (names[c] if opt.hide_conf else f'{names[c]} {conf:.2f}')
-                plot_one_box(xyxy, original_image, label=label, color=colors(c, True), line_thickness=2)
-                    
-    if view_img:
+        # Inference
+        pred = model(img, augment=False)[0]
+
+        # Apply NMS
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+
+        save_path = os.path.join(save_dir, file_name)
+        # Process detections
+        for det in pred:  # detections per image
+            if len(det):
+                # Rescale boxes from img size to original_image size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], original_image.shape).round()
+
+                # Write results
+                for *xyxy, conf, cls in reversed(det):
+                    c = int(cls)  # integer class
+                    label = (names[c] if opt.hide_conf else f'{names[c]} {conf:.2f}')
+                    plot_one_box(xyxy, original_image, label=label, color=colors(c, True), line_thickness=2)
+
+        # if view_img:
         cv2.imshow("result", original_image)
-        cv2.waitKey(0)  # 1 millisecond
+        cv2.waitKey(1)  # 1 millisecond
 
-    # Save results (image with detections)
-    cv2.imwrite(save_path, original_image)
-
+        # Save results (image with detections)
+        # cv2.imwrite(save_path, original_image)
+        # video_writer.write(original_image)
+        # video_writer.release()
     print(f'Done. ({time.time() - t0:.3f}s)')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='weights/yolov5m.pt', help='model.pt path(s)')
-    parser.add_argument('--source', type=str, default='input/fruits.jpg', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--source', type=str, default='input/v1.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
